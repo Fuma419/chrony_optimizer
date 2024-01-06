@@ -1,0 +1,39 @@
+
+cat >> "$CONFIG_FILE" << EOF
+# Other Chrony settings
+# This directive specify the location of the file containing ID/key pairs for
+# NTP authentication.
+keyfile /etc/chrony/chrony.keys
+
+# This directive specify the file into which chronyd will store the rate
+# information.
+driftfile /var/lib/chrony/chrony.drift
+
+# Uncomment the following line to turn logging on.
+#log tracking measurements statistics
+
+# Log files location.
+logdir /var/log/chrony
+
+# Stop bad estimates upsetting machine clock.
+maxupdateskew 5.0
+
+# This directive enables kernel synchronisation (every 11 minutes) of the
+# real-time clock. Note that it can’t be used along with the 'rtcfile' directive.
+rtcsync
+
+# Step the system clock instead of slewing it if the adjustment is larger than
+# one second, but only in the first three clock updates.
+makestep 0.1 -1
+
+leapsectz right/UTC
+
+local stratum 10
+EOF
+
+# Move the file to /etc/chrony/ and restart chronyd service
+# sudo mv "$CONFIG_FILE" /etc/chrony/chrony.conf
+# sudo systemctl restart chronyd.service
+
+# Clean up: Remove the temporary file
+rm "$TMP_FILE"

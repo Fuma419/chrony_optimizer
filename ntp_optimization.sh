@@ -41,20 +41,32 @@ do
     echo "Testing $server..."
     ping_time=$(get_ping_time $server)
     read offset delay <<< $(get_ntp_metrics $server)
-    if [[ "$ping_time" != "timeout" && "$offset" != "timeout" && "$delay" != "timeout" ]]; then
-        # Convert values to positive and check if they are numbers
-        ping_time=$(echo "$ping_time" | tr -d '-')
-        offset=$(echo "$offset" | tr -d '-')
-        delay=$(echo "$delay" | tr -d '-')
+    
+    # Convert and validate ping time
+    ping_time=$(echo "$ping_time" | tr -d '-')
+    if ! [[ "$ping_time" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+        echo "Invalid or timeout for ping time for $server"
+        continue
+    fi
 
-        if [[ "$ping_time" =~ ^[0-9]+([.][0-9]+)?$ && "$offset" =~ ^[0-9]+([.][0-9]+)?$ && "$delay" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
-            score=$(echo "scale=2; 1/$ping_time + 1/$offset + 1/$delay" | bc -l)
-            echo "$score $server" >> "$TMP_FILE"
+    # Check if ping time is below the threshold
+    if (( $(echo "$ping_time < 60" | bc -l) )); then
+        if [[ "$offset" != "timeout" && "$delay" != "timeout" ]]; then
+            offset=$(echo "$offset" | tr -d '-')
+            delay=$(echo "$delay" | tr -d '-')
+
+            if [[ "$offset" =~ ^[0-9]+([.][0-9]+)?$ && "$delay" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+                # Adjusted formula: Giving double weight to ping_time
+                score=$(echo "scale=2; 2/(1/$ping_time) + 1/$offset + 1/$delay" | bc -l)
+                echo "$score $server" >> "$TMP_FILE"
+            else
+                echo "Invalid measurement for offset or delay for $server"
+            fi
         else
-            echo "Invalid measurement for $server"
+            echo "NTP metrics timeout or error for $server"
         fi
     else
-        echo "Timeout or error for $server"
+        echo "Ping time for $server exceeds 60 ms threshold"
     fi
 done < "$SERVER_LIST"
 
