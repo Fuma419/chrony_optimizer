@@ -12,8 +12,7 @@ fi
 # Function to get ping time with 1-second timeout
 get_ping_time() {
     local server=$1
-    # Ping the server with a timeout of 1 second
-    local result=$(ping -c 1 -W 1 $server 2>&1) # Redirect stderr to stdout
+    local result=$(ping -c 1 -W 1 $server 2>&1)
     if echo "$result" | grep -q 'time='; then
         echo "$result" | grep 'time=' | awk -F'=' '{ print $4 }' | cut -d ' ' -f 1
     else
@@ -21,36 +20,56 @@ get_ping_time() {
     fi
 }
 
-# Create a temporary file for sorting
+# Function to perform NTP metrics test
+get_ntp_metrics() {
+    local server=$1
+    local ntp_output=$(ntpdate -q $server 2>&1)
+    if echo "$ntp_output" | grep -q "offset"; then
+        # Use awk to calculate the average offset and delay
+        echo "$ntp_output" | grep "offset" | awk '{offsetSum += $6; delaySum += $8; count++} END {if (count > 0) print offsetSum/count, delaySum/count; else print "timeout timeout"}'
+    else
+        echo "timeout timeout"
+    fi
+}
+
+# Create a temporary file for results
 TMP_FILE=$(mktemp)
 
-# Read each server from the file and get its ping time
+# Read each server from the file and get its ping time and NTP metrics
 while IFS= read -r server
 do
-    echo "Pinging $server..."
+    echo "Testing $server..."
     ping_time=$(get_ping_time $server)
-    if [ "$ping_time" != "timeout" ]; then
-        echo "$ping_time $server" >> "$TMP_FILE"
+    read offset delay <<< $(get_ntp_metrics $server)
+    if [[ "$ping_time" != "timeout" && "$offset" != "timeout" && "$delay" != "timeout" ]]; then
+        # Convert values to positive and check if they are numbers
+        ping_time=$(echo "$ping_time" | tr -d '-')
+        offset=$(echo "$offset" | tr -d '-')
+        delay=$(echo "$delay" | tr -d '-')
+
+        if [[ "$ping_time" =~ ^[0-9]+([.][0-9]+)?$ && "$offset" =~ ^[0-9]+([.][0-9]+)?$ && "$delay" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+            score=$(echo "scale=2; 1/$ping_time + 1/$offset + 1/$delay" | bc -l)
+            echo "$score $server" >> "$TMP_FILE"
+        else
+            echo "Invalid measurement for $server"
+        fi
     else
-        echo "No response or timeout from $server"
+        echo "Timeout or error for $server"
     fi
 done < "$SERVER_LIST"
 
-# Sort the results by ping time and print
-echo "Ping Results:"
-cat "$TMP_FILE" | sort -n | while read -r line; do
-    echo "$line ms"
-done
+# Sort servers by the calculated score and print the top 10
+echo "Top 10 NTP Servers Based on Score:"
+TOP_SERVERS=$(sort -r -n "$TMP_FILE" | head -n 5)
+echo "$TOP_SERVERS"
 
-# Take top 4 servers and generate chrony config
-TOP_SERVERS=$(sort -n "$TMP_FILE" | head -n 4 | awk '{print $2}')
-
-CONFIG_FILE="$HOME/chrony.conf"
+# Generate Chrony config with the top 4 servers
+CONFIG_FILE="chrony.conf"
 cat > "$CONFIG_FILE" << EOF
 # Generated Chrony Config
 EOF
 
-for server in $TOP_SERVERS
+for server in $(echo "$TOP_SERVERS" | awk '{print $2}')
 do
     echo "pool $server iburst minpoll 1 maxpoll 1 maxsources 3 maxdelay 0.3" >> "$CONFIG_FILE"
 done
