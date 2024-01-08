@@ -68,6 +68,9 @@ done <<< "$TOP_SERVERS"
 
 
 cat >> "$CONFIG_FILE" << EOF
+
+pool time.google.com iburst minpoll 1 maxpoll 1 maxsources 4 maxdelay 0.2
+
 # Other Chrony settings
 
 # This directive specify the location of the file containing ID/key pairs for
