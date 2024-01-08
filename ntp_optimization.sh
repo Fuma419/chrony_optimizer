@@ -57,7 +57,8 @@ do
 
             if [[ "$offset" =~ ^[0-9]+([.][0-9]+)?$ && "$delay" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
                 # Adjusted formula: Giving double weight to ping_time
-                score=$(echo "scale=2; 2/(1/$ping_time) + 1/$offset + 1/$delay" | bc -l)
+                score=$(echo "scale=2; 2/(1/$ping_time) + 1/$offset + 3/$delay" | bc -l)
+		echo "scale=2; (2/$ping_time) + 1/$offset + 1/$delay"
                 echo "$score $server" >> "$TMP_FILE"
             else
                 echo "Invalid measurement for offset or delay for $server"
@@ -66,13 +67,13 @@ do
             echo "NTP metrics timeout or error for $server"
         fi
     else
-        echo "Ping time for $server exceeds 60 ms threshold"
+        echo "Ping time for $server exceeds 20 ms threshold"
     fi
 done < "$SERVER_LIST"
 
 # Sort servers by the calculated score and print the top 10
-echo "Top 10 NTP Servers Based on Score:"
-TOP_SERVERS=$(sort -r -n "$TMP_FILE" | head -n 5)
+echo "Top 5 NTP Servers Based on Score:"
+TOP_SERVERS=$(sort -r -n "$TMP_FILE" | head -n 10)
 echo "$TOP_SERVERS"
 
 # Generate Chrony config with the top 4 servers
@@ -83,7 +84,7 @@ EOF
 
 for server in $(echo "$TOP_SERVERS" | awk '{print $2}')
 do
-    echo "pool $server iburst minpoll 1 maxpoll 1 maxsources 3 maxdelay 0.3" >> "$CONFIG_FILE"
+    echo "pool $server iburst minpoll 1 maxpoll 1 maxsources 5 maxdelay 0.2" >> "$CONFIG_FILE"
 done
 
 cat >> "$CONFIG_FILE" << EOF
