@@ -9,83 +9,63 @@ if [ ! -f "$SERVER_LIST" ]; then
     exit 1
 fi
 
-# Function to get ping time with 1-second timeout
-get_ping_time() {
-    local server=$1
-    local result=$(ping -c 1 -W 1 $server 2>&1)
-    if echo "$result" | grep -q 'time='; then
-        echo "$result" | grep 'time=' | awk -F'=' '{ print $4 }' | cut -d ' ' -f 1
-    else
-        echo "timeout"
-    fi
-}
-
-# Function to perform NTP metrics test
+# Function to perform NTP metrics test and return the best server
 get_ntp_metrics() {
     local server=$1
     local ntp_output=$(ntpdate -q $server 2>&1)
-    if echo "$ntp_output" | grep -q "offset"; then
-        # Use awk to calculate the average offset and delay
-        echo "$ntp_output" | grep "offset" | awk '{offsetSum += $6; delaySum += $8; count++} END {if (count > 0) print offsetSum/count, delaySum/count; else print "timeout timeout"}'
+
+    if echo "$ntp_output" | grep -q "delay"; then
+        echo "$ntp_output" | awk -F 'delay ' '{print $2}' | awk '{print $1}' | awk '{sum+=$1; count++} END {if (count>0) print sum/count; else print "timeout"}'
     else
-        echo "timeout timeout"
+        echo "timeout"
     fi
 }
 
 # Create a temporary file for results
 TMP_FILE=$(mktemp)
 
-# Read each server from the file and get its ping time and NTP metrics
+# Read each server from the file and get its NTP delay
 while IFS= read -r server
 do
     echo "Testing $server..."
-    ping_time=$(get_ping_time $server)
-    read offset delay <<< $(get_ntp_metrics $server)
-    
-    # Convert and validate ping time
-    ping_time=$(echo "$ping_time" | tr -d '-')
-    if ! [[ "$ping_time" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
-        echo "Invalid or timeout for ping time for $server"
-        continue
-    fi
-
-    # Check if ping time is below the threshold
-    if (( $(echo "$ping_time < 60" | bc -l) )); then
-        if [[ "$offset" != "timeout" && "$delay" != "timeout" ]]; then
-            offset=$(echo "$offset" | tr -d '-')
-            delay=$(echo "$delay" | tr -d '-')
-
-            if [[ "$offset" =~ ^[0-9]+([.][0-9]+)?$ && "$delay" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
-                # Adjusted formula: Giving double weight to ping_time
-                score=$(echo "scale=2; 2/(1/$ping_time) + 1/$offset + 3/$delay" | bc -l)
-		echo "scale=2; (2/$ping_time) + 1/$offset + 1/$delay"
-                echo "$score $server" >> "$TMP_FILE"
-            else
-                echo "Invalid measurement for offset or delay for $server"
-            fi
-        else
-            echo "NTP metrics timeout or error for $server"
-        fi
-    else
-        echo "Ping time for $server exceeds 20 ms threshold"
+    avg_delay=$(get_ntp_metrics $server)
+    echo "Resulting delay for $server: $avg_delay"
+    if [[ "$avg_delay" != "timeout" ]]; then
+        echo "$avg_delay $server" >> "$TMP_FILE"
     fi
 done < "$SERVER_LIST"
 
-# Sort servers by the calculated score and print the top 10
-echo "Top 5 NTP Servers Based on Score:"
-TOP_SERVERS=$(sort -r -n "$TMP_FILE" | head -n 10)
+# Sort servers by the calculated score and print the top 5
+echo "Top 5 NTP Servers Based on Delay:"
+TOP_SERVERS=$(sort -k1 -n "$TMP_FILE" | head -n 10)
 echo "$TOP_SERVERS"
 
-# Generate Chrony config with the top 4 servers
-CONFIG_FILE="chrony.conf"
-cat > "$CONFIG_FILE" << EOF
-# Generated Chrony Config
-EOF
+# Check if TOP_SERVERS is empty
+if [ -z "$TOP_SERVERS" ]; then
+    echo "No valid NTP servers found."
+    exit 1
+fi
 
-for server in $(echo "$TOP_SERVERS" | awk '{print $2}')
-do
-    echo "pool $server iburst minpoll 1 maxpoll 1 maxsources 5 maxdelay 0.2" >> "$CONFIG_FILE"
-done
+# Generate Chrony config with the top servers
+CONFIG_FILE="chrony.conf"
+echo "# Generated Chrony Config" > "$CONFIG_FILE"
+
+# Ensure TOP_SERVERS variable is not empty
+if [ -z "$TOP_SERVERS" ]; then
+    echo "No valid NTP servers found."
+    exit 1
+fi
+
+# Loop over each line in TOP_SERVERS to extract server addresses
+while read -r delay server; do
+    if [ -n "$server" ]; then
+        # Assuming $server contains the domain name directly from the SERVER_LIST
+        echo "pool $server iburst minpoll 1 maxpoll 1 maxsources 3 maxdelay 0.2" >> "$CONFIG_FILE"
+    else
+        echo "Error: Invalid server address extracted."
+    fi
+done <<< "$TOP_SERVERS"
+
 
 cat >> "$CONFIG_FILE" << EOF
 # Other Chrony settings
