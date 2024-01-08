@@ -37,7 +37,7 @@ done < "$SERVER_LIST"
 
 # Sort servers by the calculated score and print the top 5
 echo "Top 5 NTP Servers Based on Delay:"
-TOP_SERVERS=$(sort -k1 -n "$TMP_FILE" | head -n 10)
+TOP_SERVERS=$(sort -k1 -n "$TMP_FILE" | head -n 5)
 echo "$TOP_SERVERS"
 
 # Check if TOP_SERVERS is empty
@@ -60,7 +60,7 @@ fi
 while read -r delay server; do
     if [ -n "$server" ]; then
         # Assuming $server contains the domain name directly from the SERVER_LIST
-        echo "pool $server iburst minpoll 1 maxpoll 1 maxsources 3 maxdelay 0.2" >> "$CONFIG_FILE"
+        echo "pool $server iburst minpoll 1 maxpoll 1 maxsources 4 maxdelay 0.2" >> "$CONFIG_FILE"
     else
         echo "Error: Invalid server address extracted."
     fi
@@ -69,6 +69,7 @@ done <<< "$TOP_SERVERS"
 
 cat >> "$CONFIG_FILE" << EOF
 # Other Chrony settings
+
 # This directive specify the location of the file containing ID/key pairs for
 # NTP authentication.
 keyfile /etc/chrony/chrony.keys
